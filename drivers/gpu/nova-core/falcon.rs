@@ -364,8 +364,7 @@ pub(crate) struct Falcon<'a, E: FalconEngine> {
     hal: KBox<dyn FalconHal<E>>,
     dev: &'a device::Device<device::Bound>,
     bar: Bar0<'a>,
-    // TODO: make private
-    pub(crate) pfalcon: Mmio<'a, PFalconRegisters>,
+    pfalcon: Mmio<'a, PFalconRegisters>,
     pfalcon2: Mmio<'a, PFalcon2Registers>,
 }
 
@@ -393,6 +392,24 @@ impl<'a, E: FalconEngine + 'static> Falcon<'a, E> {
 
         self.pfalcon
             .write_reg(regs::NV_PFALCON_FALCON_DMACTL::zeroed());
+    }
+
+    /// Configures FBIF transaction parameters for a DMA context.
+    pub(crate) fn set_fbif_transcfg(
+        &self,
+        ctx_dma: usize,
+        target: FalconFbifTarget,
+        mem_type: FalconFbifMemType,
+    ) -> Result {
+        self.pfalcon.update(
+            regs::NV_PFALCON_FBIF_TRANSCFG::try_at(ctx_dma).ok_or(EINVAL)?,
+            |v| {
+                v.with_target(target)
+                    .with_mem_type(mem_type)
+            },
+        );
+
+        Ok(())
     }
 
     /// Reset the controller, select the falcon core, and wait for memory scrubbing to complete.
@@ -614,11 +631,7 @@ impl<'a, E: FalconEngine + 'static> Falcon<'a, E> {
         };
 
         self.dma_reset();
-        self.pfalcon
-            .update(regs::NV_PFALCON_FBIF_TRANSCFG::at(0), |v| {
-                v.with_target(FalconFbifTarget::CoherentSysmem)
-                    .with_mem_type(FalconFbifMemType::Physical)
-            });
+        self.set_fbif_transcfg(0, FalconFbifTarget::CoherentSysmem, FalconFbifMemType::Physical)?;
 
         self.dma_wr(&dma_obj, FalconMem::ImemSecure, fw.imem_sec_load_params())?;
         self.dma_wr(&dma_obj, FalconMem::Dmem, fw.dmem_load_params())?;
